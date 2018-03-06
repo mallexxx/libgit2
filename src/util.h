@@ -9,12 +9,16 @@
 
 #include "common.h"
 
-#include "git2/buffer.h"
-#include "buffer.h"
-#include "thread-utils.h"
+#ifndef GIT_WIN32
+# include <ctype.h>
+#endif
 
+#include "git2/buffer.h"
+
+#include "buffer.h"
 #include "common.h"
 #include "strnlen.h"
+#include "thread-utils.h"
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 #define bitsizeof(x) (CHAR_BIT * sizeof(x))
@@ -180,6 +184,7 @@ GIT_INLINE(void) git__free(void *ptr)
 
 extern int git__prefixcmp(const char *str, const char *prefix);
 extern int git__prefixcmp_icase(const char *str, const char *prefix);
+extern int git__prefixncmp(const char *str, size_t str_n, const char *prefix);
 extern int git__prefixncmp_icase(const char *str, size_t str_n, const char *prefix);
 extern int git__suffixcmp(const char *str, const char *suffix);
 
@@ -538,4 +543,4 @@ GIT_INLINE(double) git__timer(void)
 
 extern int git__getenv(git_buf *out, const char *name);
 
-#endif /* INCLUDE_util_h__ */
+#endif
