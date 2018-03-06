@@ -332,9 +332,9 @@ int git_curl_stream_new(git_stream **out, const char *host, const char *port)
 	curl_easy_setopt(handle, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 20L);
     
-    curl_easy_setopt(s->handle, CURLOPT_TCP_FASTOPEN, 1L);
-    curl_easy_setopt(s->handle, CURLOPT_TCP_NODELAY, 1L);
-    curl_easy_setopt(s->handle, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(handle, CURLOPT_TCP_FASTOPEN, 1L);
+    curl_easy_setopt(handle, CURLOPT_TCP_NODELAY, 1L);
+    curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
     
 	/* curl_easy_setopt(handle, CURLOPT_VERBOSE, 1); */
 
