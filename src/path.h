@@ -13,6 +13,8 @@
 #include "buffer.h"
 #include "vector.h"
 
+#include "git2/sys/path.h"
+
 /**
  * Path manipulation utils
  *
@@ -637,6 +639,7 @@ extern int git_path_from_url_or_path(git_buf *local_path_out, const char *url_or
 extern bool git_path_isvalid(
 	git_repository *repo,
 	const char *path,
+	uint16_t mode,
 	unsigned int flags);
 
 /**

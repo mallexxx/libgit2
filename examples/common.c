@@ -12,6 +12,11 @@
  * <http://creativecommons.org/publicdomain/zero/1.0/>.
  */
 
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+
 #include "common.h"
 
 void check_lg2(int error, const char *message, const char *extra)
@@ -22,7 +27,7 @@ void check_lg2(int error, const char *message, const char *extra)
 	if (!error)
 		return;
 
-	if ((lg2err = giterr_last()) != NULL && lg2err->message != NULL) {
+	if ((lg2err = git_error_last()) != NULL && lg2err->message != NULL) {
 		lg2msg = lg2err->message;
 		lg2spacer = " - ";
 	}
@@ -182,6 +187,25 @@ static int match_int_internal(
 	return 1;
 }
 
+int match_bool_arg(int *out, struct args_info *args, const char *opt)
+{
+	const char *found = args->argv[args->pos];
+
+	if (!strcmp(found, opt)) {
+		*out = 1;
+		return 1;
+	}
+
+	if (!strncmp(found, "--no-", strlen("--no-")) &&
+	    !strcmp(found + strlen("--no-"), opt + 2)) {
+		*out = 0;
+		return 1;
+	}
+
+	*out = -1;
+	return 0;
+}
+
 int is_integer(int *out, const char *str, int allow_negative)
 {
 	return match_int_internal(out, str, allow_negative, NULL);
@@ -229,7 +253,7 @@ void treeish_to_tree(
 		"looking up object", treeish);
 
 	check_lg2(
-		git_object_peel((git_object **)out, obj, GIT_OBJ_TREE),
+		git_object_peel((git_object **)out, obj, GIT_OBJECT_TREE),
 		"resolving object to tree", treeish);
 
 	git_object_free(obj);
@@ -245,3 +269,99 @@ void *xrealloc(void *oldp, size_t newsz)
 	return p;
 }
 
+int resolve_refish(git_annotated_commit **commit, git_repository *repo, const char *refish)
+{
+	git_reference *ref;
+	git_object *obj;
+	int err = 0;
+
+	assert(commit != NULL);
+
+	err = git_reference_dwim(&ref, repo, refish);
+	if (err == GIT_OK) {
+		git_annotated_commit_from_ref(commit, repo, ref);
+		git_reference_free(ref);
+		return 0;
+	}
+
+	err = git_revparse_single(&obj, repo, refish);
+	if (err == GIT_OK) {
+		err = git_annotated_commit_lookup(commit, repo, git_object_id(obj));
+		git_object_free(obj);
+	}
+
+	return err;
+}
+
+static int readline(char **out)
+{
+	int c, error = 0, length = 0, allocated = 0;
+	char *line = NULL;
+
+	errno = 0;
+
+	while ((c = getchar()) != EOF) {
+		if (length == allocated) {
+			allocated += 16;
+
+			if ((line = realloc(line, allocated)) == NULL) {
+				error = -1;
+				goto error;
+			}
+		}
+
+		if (c == '\n')
+			break;
+
+		line[length++] = c;
+	}
+
+	if (errno != 0) {
+		error = -1;
+		goto error;
+	}
+
+	line[length] = '\0';
+	*out = line;
+	line = NULL;
+	error = length;
+error:
+	free(line);
+	return error;
+}
+
+int cred_acquire_cb(git_cred **out,
+		const char *url,
+		const char *username_from_url,
+		unsigned int allowed_types,
+		void *payload)
+{
+	char *username = NULL, *password = NULL;
+	int error;
+
+	UNUSED(url);
+	UNUSED(username_from_url);
+	UNUSED(allowed_types);
+	UNUSED(payload);
+
+	printf("Username: ");
+	if (readline(&username) < 0) {
+		fprintf(stderr, "Unable to read username: %s", strerror(errno));
+		return -1;
+	}
+
+	/* Yup. Right there on your terminal. Careful where you copy/paste output. */
+	printf("Password: ");
+	if (readline(&password) < 0) {
+		fprintf(stderr, "Unable to read password: %s", strerror(errno));
+		free(username);
+		return -1;
+	}
+
+	error = git_cred_userpass_plaintext_new(out, username, password);
+
+	free(username);
+	free(password);
+
+	return error;
+}

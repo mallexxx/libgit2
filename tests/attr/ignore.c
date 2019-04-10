@@ -61,6 +61,22 @@ void test_attr_ignore__ignore_space(void)
 	assert_is_ignored(true, "NewFolder/NewFolder/File.txt");
 }
 
+void test_attr_ignore__ignore_dir(void)
+{
+	cl_git_rewritefile("attr/.gitignore", "dir/\n");
+
+	assert_is_ignored(true, "dir");
+	assert_is_ignored(true, "dir/file");
+}
+
+void test_attr_ignore__ignore_dir_with_trailing_space(void)
+{
+	cl_git_rewritefile("attr/.gitignore", "dir/ \n");
+
+	assert_is_ignored(true, "dir");
+	assert_is_ignored(true, "dir/file");
+}
+
 void test_attr_ignore__ignore_root(void)
 {
 	cl_git_rewritefile("attr/.gitignore", "/\n\n/NewFolder\n/NewFolder/NewFolder");
@@ -355,4 +371,45 @@ void test_attr_ignore__case_sensitive_unignore_does_nothing(void)
 	cl_git_mkfile("attr/case/file", "content");
 
 	assert_is_ignored(true, "case/file");
+}
+
+void test_attr_ignore__ignored_subdirfiles_with_subdir_rule(void)
+{
+	cl_git_rewritefile(
+		"attr/.gitignore",
+		"dir/*\n"
+		"!dir/sub1/sub2/**\n");
+
+	assert_is_ignored(true, "dir/a.test");
+	assert_is_ignored(true, "dir/sub1/a.test");
+	assert_is_ignored(true, "dir/sub1/sub2");
+}
+
+void test_attr_ignore__ignored_subdirfiles_with_negations(void)
+{
+	cl_git_rewritefile(
+		"attr/.gitignore",
+		"dir/*\n"
+		"!dir/a.test\n");
+
+	assert_is_ignored(false, "dir/a.test");
+	assert_is_ignored(true, "dir/b.test");
+	assert_is_ignored(true, "dir/sub1/c.test");
+}
+
+void test_attr_ignore__negative_directory_rules_only_match_directories(void)
+{
+	cl_git_rewritefile(
+		"attr/.gitignore",
+		"*\n"
+		"!/**/\n"
+		"!*.keep\n"
+		"!.gitignore\n"
+	);
+
+	assert_is_ignored(true, "src");
+	assert_is_ignored(true, "src/A");
+	assert_is_ignored(false, "src/");
+	assert_is_ignored(false, "src/A.keep");
+	assert_is_ignored(false, ".gitignore");
 }

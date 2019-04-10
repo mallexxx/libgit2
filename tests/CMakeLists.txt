@@ -9,6 +9,10 @@ SET(CLAR_FIXTURES "${CMAKE_CURRENT_SOURCE_DIR}/resources/")
 SET(CLAR_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
 ADD_DEFINITIONS(-DCLAR_FIXTURE_PATH=\"${CLAR_FIXTURES}\")
 ADD_DEFINITIONS(-DCLAR_TMPDIR=\"libgit2_tests\")
+ADD_DEFINITIONS(-D_FILE_OFFSET_BITS=64)
+
+# Ensure that we do not use deprecated functions internally
+ADD_DEFINITIONS(-DGIT_DEPRECATE_HARD)
 
 INCLUDE_DIRECTORIES(${CLAR_PATH} ${libgit2_BINARY_DIR}/src)
 FILE(GLOB_RECURSE SRC_TEST ${CLAR_PATH}/*/*.c ${CLAR_PATH}/*/*.h)
@@ -30,11 +34,12 @@ SET_SOURCE_FILES_PROPERTIES(
 	${CLAR_PATH}/clar.c
 	PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/clar.suite)
 
-LINK_DIRECTORIES(${LIBGIT2_LIBDIRS})
 INCLUDE_DIRECTORIES(${LIBGIT2_INCLUDES})
+INCLUDE_DIRECTORIES(SYSTEM ${LIBGIT2_SYSTEM_INCLUDES})
 
 ADD_EXECUTABLE(libgit2_clar ${SRC_CLAR} ${SRC_TEST} ${LIBGIT2_OBJECTS})
 
+SET_TARGET_PROPERTIES(libgit2_clar PROPERTIES C_STANDARD 90)
 SET_TARGET_PROPERTIES(libgit2_clar PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${libgit2_BINARY_DIR})
 
 IF (${CMAKE_VERSION} VERSION_LESS 2.8.12)
@@ -52,12 +57,9 @@ IF (MSVC_IDE)
 	SET_SOURCE_FILES_PROPERTIES("precompiled.c" COMPILE_FLAGS "/Ycprecompiled.h")
 ENDIF ()
 
-IF (USE_HTTPS)
-	ADD_TEST(libgit2_clar "${libgit2_BINARY_DIR}/libgit2_clar" -ionline -xclone::local::git_style_unc_paths -xclone::local::standard_unc_paths_are_written_git_style)
-ELSE ()
-	ADD_TEST(libgit2_clar "${libgit2_BINARY_DIR}/libgit2_clar" -v -xclone::local::git_style_unc_paths -xclone::local::standard_unc_paths_are_written_git_style)
-ENDIF ()
-
-# Add additional test targets that require special setup
-ADD_TEST(libgit2_clar-proxy_credentials "${libgit2_BINARY_DIR}/libgit2_clar" -v -sonline::clone::proxy_credentials_in_url -sonline::clone::proxy_credentials_request)
-ADD_TEST(libgit2_clar-ssh "${libgit2_BINARY_DIR}/libgit2_clar" -v -sonline::push -sonline::clone::ssh_cert -sonline::clone::ssh_with_paths)
+ADD_TEST(offline   "${libgit2_BINARY_DIR}/libgit2_clar" -v -xonline)
+ADD_TEST(invasive  "${libgit2_BINARY_DIR}/libgit2_clar" -v -score::ftruncate -sfilter::stream::bigfile -sodb::largefiles -siterator::workdir::filesystem_gunk -srepo::init -srepo::init::at_filesystem_root)
+ADD_TEST(online    "${libgit2_BINARY_DIR}/libgit2_clar" -v -sonline)
+ADD_TEST(gitdaemon "${libgit2_BINARY_DIR}/libgit2_clar" -v -sonline::push)
+ADD_TEST(ssh       "${libgit2_BINARY_DIR}/libgit2_clar" -v -sonline::push -sonline::clone::ssh_cert -sonline::clone::ssh_with_paths)
+ADD_TEST(proxy     "${libgit2_BINARY_DIR}/libgit2_clar" -v -sonline::clone::proxy_credentials_in_url -sonline::clone::proxy_credentials_request)

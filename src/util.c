@@ -10,7 +10,12 @@
 #include "common.h"
 
 #ifdef GIT_WIN32
+# include "win32/utf-conv.h"
 # include "win32/w32_buffer.h"
+
+# ifdef HAVE_QSORT_S
+#  include <search.h>
+# endif
 #endif
 
 #ifdef _MSC_VER
@@ -44,7 +49,7 @@ int git_strarray_copy(git_strarray *tgt, const git_strarray *src)
 		return 0;
 
 	tgt->strings = git__calloc(src->count, sizeof(char *));
-	GITERR_CHECK_ALLOC(tgt->strings);
+	GIT_ERROR_CHECK_ALLOC(tgt->strings);
 
 	for (i = 0; i < src->count; ++i) {
 		if (!src->strings[i])
@@ -63,12 +68,6 @@ int git_strarray_copy(git_strarray *tgt, const git_strarray *src)
 	return 0;
 }
 
-int git__strtol64(int64_t *result, const char *nptr, const char **endptr, int base)
-{
-
-	return git__strntol64(result, nptr, (size_t)-1, endptr, base);
-}
-
 int git__strntol64(int64_t *result, const char *nptr, size_t nptr_len, const char **endptr, int base)
 {
 	const char *p;
@@ -84,34 +83,54 @@ int git__strntol64(int64_t *result, const char *nptr, size_t nptr_len, const cha
 	/*
 	 * White space
 	 */
-	while (git__isspace(*p))
-		p++;
+	while (nptr_len && git__isspace(*p))
+		p++, nptr_len--;
+
+	if (!nptr_len)
+		goto Return;
 
 	/*
 	 * Sign
 	 */
-	if (*p == '-' || *p == '+')
-		if (*p++ == '-')
+	if (*p == '-' || *p == '+') {
+		if (*p == '-')
 			neg = 1;
+		p++;
+		nptr_len--;
+	}
+
+	if (!nptr_len)
+		goto Return;
 
 	/*
-	 * Base
+	 * Automatically detect the base if none was given to us.
+	 * Right now, we assume that a number starting with '0x'
+	 * is hexadecimal and a number starting with '0' is
+	 * octal.
 	 */
 	if (base == 0) {
 		if (*p != '0')
 			base = 10;
-		else {
+		else if (nptr_len > 2 && (p[1] == 'x' || p[1] == 'X'))
+			base = 16;
+		else
 			base = 8;
-			if (p[1] == 'x' || p[1] == 'X') {
-				p += 2;
-				base = 16;
-			}
-		}
-	} else if (base == 16 && *p == '0') {
-		if (p[1] == 'x' || p[1] == 'X')
-			p += 2;
-	} else if (base < 0 || 36 < base)
+	}
+
+	if (base < 0 || 36 < base)
 		goto Return;
+
+	/*
+	 * Skip prefix of '0x'-prefixed hexadecimal numbers. There is no
+	 * need to do the same for '0'-prefixed octal numbers as a
+	 * leading '0' does not have any impact. Also, if we skip a
+	 * leading '0' in such a string, then we may end up with no
+	 * digits left and produce an error later on which isn't one.
+	 */
+	if (base == 16 && nptr_len > 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+		p += 2;
+		nptr_len -= 2;
+	}
 
 	/*
 	 * Non-empty sequence of digits
@@ -127,15 +146,25 @@ int git__strntol64(int64_t *result, const char *nptr, size_t nptr_len, const cha
 			v = c - 'A' + 10;
 		if (v >= base)
 			break;
-		nn = n * base + (neg ? -v : v);
-		if ((!neg && nn < n) || (neg && nn > n))
+		v = neg ? -v : v;
+		if (n > INT64_MAX / base || n < INT64_MIN / base) {
 			ovfl = 1;
-		n = nn;
+			/* Keep on iterating until the end of this number */
+			continue;
+		}
+		nn = n * base;
+		if ((v > 0 && nn > INT64_MAX - v) ||
+		    (v < 0 && nn < INT64_MIN - v)) {
+			ovfl = 1;
+			/* Keep on iterating until the end of this number */
+			continue;
+		}
+		n = nn + v;
 	}
 
 Return:
 	if (ndig == 0) {
-		giterr_set(GITERR_INVALID, "failed to convert string to long: not a number");
+		git_error_set(GIT_ERROR_INVALID, "failed to convert string to long: not a number");
 		return -1;
 	}
 
@@ -143,7 +172,7 @@ Return:
 		*endptr = p;
 
 	if (ovfl) {
-		giterr_set(GITERR_INVALID, "failed to convert string to long: overflow error");
+		git_error_set(GIT_ERROR_INVALID, "failed to convert string to long: overflow error");
 		return -1;
 	}
 
@@ -151,37 +180,28 @@ Return:
 	return 0;
 }
 
-int git__strtol32(int32_t *result, const char *nptr, const char **endptr, int base)
-{
-
-	return git__strntol32(result, nptr, (size_t)-1, endptr, base);
-}
-
 int git__strntol32(int32_t *result, const char *nptr, size_t nptr_len, const char **endptr, int base)
 {
-	int error;
+	const char *tmp_endptr;
 	int32_t tmp_int;
 	int64_t tmp_long;
+	int error;
 
-	if ((error = git__strntol64(&tmp_long, nptr, nptr_len, endptr, base)) < 0)
+	if ((error = git__strntol64(&tmp_long, nptr, nptr_len, &tmp_endptr, base)) < 0)
 		return error;
 
 	tmp_int = tmp_long & 0xFFFFFFFF;
 	if (tmp_int != tmp_long) {
-		giterr_set(GITERR_INVALID, "failed to convert: '%s' is too large", nptr);
+		int len = tmp_endptr - nptr;
+		git_error_set(GIT_ERROR_INVALID, "failed to convert: '%.*s' is too large", len, nptr);
 		return -1;
 	}
 
 	*result = tmp_int;
+	if (endptr)
+		*endptr = tmp_endptr;
 
 	return error;
-}
-
-int git__strcmp(const char *a, const char *b)
-{
-	while (*a && *b && *a == *b)
-		++a, ++b;
-	return (int)(*(const unsigned char *)a) - (int)(*(const unsigned char *)b);
 }
 
 int git__strcasecmp(const char *a, const char *b)
@@ -211,15 +231,6 @@ int git__strcasesort_cmp(const char *a, const char *b)
 		return (unsigned char)git__tolower(*a) - (unsigned char)git__tolower(*b);
 
 	return cmp;
-}
-
-int git__strncmp(const char *a, const char *b, size_t sz)
-{
-	while (sz && *a && *b && *a == *b)
-		--sz, ++a, ++b;
-	if (!sz)
-		return 0;
-	return (int)(*(const unsigned char *)a) - (int)(*(const unsigned char *)b);
 }
 
 int git__strncasecmp(const char *a, const char *b, size_t sz)
@@ -274,7 +285,18 @@ GIT_INLINE(int) prefixcmp(const char *str, size_t str_n, const char *prefix, boo
 
 int git__prefixcmp(const char *str, const char *prefix)
 {
-	return prefixcmp(str, SIZE_MAX, prefix, false);
+	unsigned char s, p;
+
+	while (1) {
+		p = *prefix++;
+		s = *str++;
+
+		if (!p)
+			return 0;
+
+		if (s != p)
+			return s - p;
+	}
 }
 
 int git__prefixncmp(const char *str, size_t str_n, const char *prefix)
@@ -348,6 +370,47 @@ size_t git__linenlen(const char *buffer, size_t buffer_len)
 {
 	char *nl = memchr(buffer, '\n', buffer_len);
 	return nl ? (size_t)(nl - buffer) + 1 : buffer_len;
+}
+
+/*
+ * Adapted Not So Naive algorithm from http://www-igm.univ-mlv.fr/~lecroq/string/
+ */
+const void * git__memmem(const void *haystack, size_t haystacklen,
+			 const void *needle, size_t needlelen)
+{
+	const char *h, *n;
+	size_t j, k, l;
+
+	if (needlelen > haystacklen || !haystacklen || !needlelen)
+		return NULL;
+
+	h = (const char *) haystack,
+	n = (const char *) needle;
+
+	if (needlelen == 1)
+		return memchr(haystack, *n, haystacklen);
+
+	if (n[0] == n[1]) {
+		k = 2;
+		l = 1;
+	} else {
+		k = 1;
+		l = 2;
+	}
+
+	j = 0;
+	while (j <= haystacklen - needlelen) {
+		if (n[1] != h[j + 1]) {
+			j += k;
+		} else {
+			if (memcmp(n + 2, h + j + 2, needlelen - 2) == 0 &&
+			    n[0] == h[j])
+				return h + j;
+			j += l;
+		}
+	}
+
+	return NULL;
 }
 
 void git__hexdump(const char *buffer, size_t len)
@@ -642,7 +705,7 @@ size_t git__unescape(char *str)
 	return (pos - str);
 }
 
-#if defined(HAVE_QSORT_S) || (defined(HAVE_QSORT_R) && defined(BSD))
+#if defined(HAVE_QSORT_S) || defined(HAVE_QSORT_R_BSD)
 typedef struct {
 	git__sort_r_cmp cmp;
 	void *payload;
@@ -659,10 +722,10 @@ static int GIT_STDLIB_CALL git__qsort_r_glue_cmp(
 void git__qsort_r(
 	void *els, size_t nel, size_t elsize, git__sort_r_cmp cmp, void *payload)
 {
-#if defined(HAVE_QSORT_R) && defined(BSD)
+#if defined(HAVE_QSORT_R_BSD)
 	git__qsort_r_glue glue = { cmp, payload };
 	qsort_r(els, nel, elsize, &glue, git__qsort_r_glue_cmp);
-#elif defined(HAVE_QSORT_R) && defined(__GLIBC__)
+#elif defined(HAVE_QSORT_R_GNU)
 	qsort_r(els, nel, elsize, cmp, payload);
 #elif defined(HAVE_QSORT_S)
 	git__qsort_r_glue glue = { cmp, payload };
@@ -796,9 +859,20 @@ int git__utf8_iterate(const uint8_t *str, int str_len, int32_t *dst)
 	return length;
 }
 
-double git_time_monotonic(void)
+size_t git__utf8_valid_buf_length(const uint8_t *str, size_t str_len)
 {
-	return git__timer();
+	size_t offset = 0;
+
+	while (offset < str_len) {
+		int length = git__utf8_charlen(str + offset, str_len - offset);
+
+		if (length < 0)
+			break;
+
+		offset += length;
+	}
+
+	return offset;
 }
 
 #ifdef GIT_WIN32
@@ -815,7 +889,7 @@ int git__getenv(git_buf *out, const char *name)
 
 	if ((value_len = GetEnvironmentVariableW(wide_name, NULL, 0)) > 0) {
 		wide_value = git__malloc(value_len * sizeof(wchar_t));
-		GITERR_CHECK_ALLOC(wide_value);
+		GIT_ERROR_CHECK_ALLOC(wide_value);
 
 		value_len = GetEnvironmentVariableW(wide_name, wide_value, value_len);
 	}
@@ -825,7 +899,7 @@ int git__getenv(git_buf *out, const char *name)
 	else if (GetLastError() == ERROR_ENVVAR_NOT_FOUND)
 		error = GIT_ENOTFOUND;
 	else
-		giterr_set(GITERR_OS, "could not read environment variable '%s'", name);
+		git_error_set(GIT_ERROR_OS, "could not read environment variable '%s'", name);
 
 	git__free(wide_name);
 	git__free(wide_value);

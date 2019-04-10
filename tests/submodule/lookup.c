@@ -132,6 +132,27 @@ void test_submodule_lookup__foreach(void)
 	cl_assert_equal_i(8, data.count);
 }
 
+static int foreach_cb(git_submodule *sm, const char *name, void *payload)
+{
+	GIT_UNUSED(sm);
+	GIT_UNUSED(name);
+	GIT_UNUSED(payload);
+	return 0;
+}
+
+void test_submodule_lookup__duplicated_path(void)
+{
+	cl_git_rewritefile("submod2/.gitmodules",
+			   "[submodule \"sm1\"]\n"
+			   "    path = duplicated-path\n"
+			   "    url = sm1\n"
+			   "[submodule \"sm2\"]\n"
+			   "    path = duplicated-path\n"
+			   "    url = sm2\n");
+
+	cl_git_fail(git_submodule_foreach(g_repo, foreach_cb, NULL));
+}
+
 void test_submodule_lookup__lookup_even_with_unborn_head(void)
 {
 	git_reference *head;
@@ -174,7 +195,7 @@ void test_submodule_lookup__backslashes(void)
 
 	cl_git_pass(git_submodule_resolve_url(&buf, g_repo, backslashed_path));
 
-	git_buf_free(&buf);
+	git_buf_dispose(&buf);
 	git_submodule_free(sm);
 	git_repository_free(subrepo);
 }
@@ -206,7 +227,7 @@ static void add_submodule_with_commit(const char *name)
 
 	cl_git_pass(git_buf_joinpath(&p, git_repository_workdir(smrepo), "file"));
 	cl_git_mkfile(p.ptr, "new file");
-	git_buf_free(&p);
+	git_buf_dispose(&p);
 
 	cl_git_pass(git_index_add_bypath(idx, "file"));
 	cl_git_pass(git_index_write(idx));
@@ -272,7 +293,7 @@ void test_submodule_lookup__just_added(void)
 	baseline_tests();
 
 	cl_git_rewritefile("submod2/.gitmodules", snap2.ptr);
-	git_buf_free(&snap2);
+	git_buf_dispose(&snap2);
 
 	refute_submodule_exists(g_repo, "mismatch_name", GIT_ENOTFOUND);
 	refute_submodule_exists(g_repo, "mismatch_path", GIT_ENOTFOUND);
@@ -283,7 +304,7 @@ void test_submodule_lookup__just_added(void)
 	baseline_tests();
 
 	cl_git_rewritefile("submod2/.gitmodules", snap1.ptr);
-	git_buf_free(&snap1);
+	git_buf_dispose(&snap1);
 
 	refute_submodule_exists(g_repo, "mismatch_name", GIT_ENOTFOUND);
 	refute_submodule_exists(g_repo, "mismatch_path", GIT_ENOTFOUND);
@@ -430,18 +451,26 @@ void test_submodule_lookup__lookup_in_bare_repository_fails(void)
 	cl_git_fail(git_submodule_lookup(&sm, g_repo, "nonexisting"));
 }
 
-static int foreach_cb(git_submodule *sm, const char *name, void *payload)
-{
-	GIT_UNUSED(sm);
-	GIT_UNUSED(name);
-	GIT_UNUSED(payload);
-	return 0;
-}
-
 void test_submodule_lookup__foreach_in_bare_repository_fails(void)
 {
 	cl_git_sandbox_cleanup();
 	g_repo = cl_git_sandbox_init("submodules.git");
 
 	cl_git_fail(git_submodule_foreach(g_repo, foreach_cb, NULL));
+}
+
+void test_submodule_lookup__fail_invalid_gitmodules(void)
+{
+	git_submodule *sm;
+	sm_lookup_data data;
+	memset(&data, 0, sizeof(data));
+
+	cl_git_rewritefile("submod2/.gitmodules",
+			   "[submodule \"Test_App\"\n"
+			   "    path = Test_App\n"
+			   "    url = ../Test_App\n");
+
+	cl_git_fail(git_submodule_lookup(&sm, g_repo, "Test_App"));
+
+	cl_git_fail(git_submodule_foreach(g_repo, sm_lookup_cb, &data));
 }

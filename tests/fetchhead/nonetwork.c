@@ -94,7 +94,7 @@ void test_fetchhead_nonetwork__write(void)
 
 	equals = (strcmp(fetchhead_buf.ptr, FETCH_HEAD_WILDCARD_DATA_LOCAL) == 0);
 
-	git_buf_free(&fetchhead_buf);
+	git_buf_dispose(&fetchhead_buf);
 
 	git_vector_foreach(&fetchhead_vector, i, fetchhead_ref) {
 		git_fetchhead_ref_free(fetchhead_ref);
@@ -293,7 +293,7 @@ void test_fetchhead_nonetwork__invalid_for_merge(void)
 	cl_git_rewritefile("./test1/.git/FETCH_HEAD", "49322bb17d3acc9146f98c97d078513228bbf3c0\tinvalid-merge\t\n");
 	cl_git_fail(git_repository_fetchhead_foreach(g_repo, read_noop, NULL));
 
-	cl_assert(git__prefixcmp(giterr_last()->message, "invalid for-merge") == 0);
+	cl_assert(git__prefixcmp(git_error_last()->message, "invalid for-merge") == 0);
 }
 
 void test_fetchhead_nonetwork__invalid_description(void)
@@ -304,7 +304,7 @@ void test_fetchhead_nonetwork__invalid_description(void)
 	cl_git_rewritefile("./test1/.git/FETCH_HEAD", "49322bb17d3acc9146f98c97d078513228bbf3c0\tnot-for-merge\n");
 	cl_git_fail(git_repository_fetchhead_foreach(g_repo, read_noop, NULL));
 
-	cl_assert(git__prefixcmp(giterr_last()->message, "invalid description") == 0);
+	cl_assert(git__prefixcmp(git_error_last()->message, "invalid description") == 0);
 }
 
 static int assert_master_for_merge(const char *ref, const char *url, const git_oid *id, unsigned int is_merge, void *data)
@@ -341,6 +341,29 @@ void test_fetchhead_nonetwork__unborn_with_upstream(void)
 
 	git_repository_free(repo);
 	cl_fixture_cleanup("./repowithunborn");
+}
+
+void test_fetchhead_nonetwork__fetch_into_repo_with_symrefs(void)
+{
+	git_repository *repo;
+	git_remote *remote;
+	git_reference *symref;
+
+	repo = cl_git_sandbox_init("empty_standard_repo");
+
+	/*
+	 * Testing for a specific constellation where the repository has at
+	 * least one symbolic reference in its refdb.
+	 */
+	cl_git_pass(git_reference_symbolic_create(&symref, repo, "refs/heads/symref", "refs/heads/master", 0, NULL));
+
+	cl_git_pass(git_remote_set_url(repo, "origin", cl_fixture("testrepo.git")));
+	cl_git_pass(git_remote_lookup(&remote, repo, "origin"));
+	cl_git_pass(git_remote_fetch(remote, NULL, NULL, NULL));
+
+	git_remote_free(remote);
+	git_reference_free(symref);
+	cl_git_sandbox_cleanup();
 }
 
 void test_fetchhead_nonetwork__quote_in_branch_name(void)
@@ -404,7 +427,7 @@ void test_fetchhead_nonetwork__create_when_refpecs_given(void)
 	cl_assert(found_haacked);
 
 	git_remote_free(remote);
-	git_buf_free(&path);
+	git_buf_dispose(&path);
 }
 
 static bool count_refs_called;
@@ -468,5 +491,5 @@ void test_fetchhead_nonetwork__create_with_multiple_refspecs(void)
 	}
 
 	git_remote_free(remote);
-	git_buf_free(&path);
+	git_buf_dispose(&path);
 }

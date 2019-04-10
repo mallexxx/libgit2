@@ -254,11 +254,11 @@ int git_win32__crtdbg_stacktrace__dump(
 	bool b_quiet            = IS_BIT_SET(opt, GIT_WIN32__CRTDBG_STACKTRACE__QUIET);
 
 	if (b_leaks_since_mark && b_leaks_total) {
-		giterr_set(GITERR_INVALID, "cannot combine LEAKS_SINCE_MARK and LEAKS_TOTAL.");
+		git_error_set(GIT_ERROR_INVALID, "cannot combine LEAKS_SINCE_MARK and LEAKS_TOTAL.");
 		return GIT_ERROR;
 	}
 	if (!b_set_mark && !b_leaks_since_mark && !b_leaks_total) {
-		giterr_set(GITERR_INVALID, "nothing to do.");
+		git_error_set(GIT_ERROR_INVALID, "nothing to do.");
 		return GIT_ERROR;
 	}
 
@@ -341,4 +341,5 @@ const char *git_win32__crtdbg_stacktrace(int skip, const char *file)
 
 	return result;
 }
+
 #endif
